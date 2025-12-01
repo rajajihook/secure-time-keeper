@@ -1,20 +1,23 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { StatusBadge } from "@/components/StatusBadge";
 import { MobileLayout } from "@/components/MobileLayout";
-import { Camera, MapPin, Check, RefreshCw, User, Clock, Crosshair } from "lucide-react";
+import { Camera, MapPin, Check, RefreshCw, User, Clock, Crosshair, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { useCamera } from "@/hooks/use-camera";
+import { useGeolocation } from "@/hooks/use-geolocation";
 
 type AttendanceStep = "pre-checkin" | "camera" | "confirm" | "success";
 
 export default function Attendance() {
   const navigate = useNavigate();
   const [step, setStep] = useState<AttendanceStep>("pre-checkin");
-  const [locationFixed, setLocationFixed] = useState(true);
-  const [photoTaken, setPhotoTaken] = useState(false);
+  
+  const { photo, isCapturing, takePhoto, clearPhoto } = useCamera();
+  const { location, isLoading: isLocationLoading, getCurrentPosition } = useGeolocation();
 
   const currentTime = new Date().toLocaleTimeString("en-US", {
     hour: "2-digit",
@@ -28,19 +31,29 @@ export default function Attendance() {
     day: "numeric",
   });
 
-  const handleTakePhoto = () => {
-    setStep("camera");
-  };
+  // Get location on mount
+  useEffect(() => {
+    getCurrentPosition();
+  }, [getCurrentPosition]);
 
-  const handleCapturePhoto = () => {
-    setPhotoTaken(true);
-    setStep("confirm");
-    toast.success("Photo captured!");
+  const locationFixed = !!location;
+  const locationAddress = location 
+    ? `${location.latitude.toFixed(4)}, ${location.longitude.toFixed(4)}`
+    : "Acquiring location...";
+
+  const handleTakePhoto = async () => {
+    const capturedPhoto = await takePhoto();
+    if (capturedPhoto) {
+      setStep("confirm");
+      toast.success("Photo captured!");
+    } else {
+      toast.error("Failed to capture photo. Please try again.");
+    }
   };
 
   const handleRetake = () => {
-    setPhotoTaken(false);
-    setStep("camera");
+    clearPhoto();
+    handleTakePhoto();
   };
 
   const handleMarkAttendance = () => {
@@ -50,6 +63,11 @@ export default function Attendance() {
 
   const handleStartDay = () => {
     navigate("/tracking");
+  };
+
+  const handleRefreshLocation = () => {
+    getCurrentPosition();
+    toast("Refreshing location...");
   };
 
   return (
@@ -90,19 +108,35 @@ export default function Attendance() {
                   </div>
                   <div>
                     <p className="font-medium text-foreground text-sm">Location Status</p>
-                    <p className="text-xs text-muted-foreground">123 Office Street, NYC</p>
+                    <p className="text-xs text-muted-foreground">{locationAddress}</p>
                   </div>
                 </div>
-                <StatusBadge variant={locationFixed ? "active" : "error"} pulse={locationFixed}>
-                  {locationFixed ? "Fixed" : "Acquiring"}
-                </StatusBadge>
+                <div className="flex items-center gap-2">
+                  <StatusBadge 
+                    variant={isLocationLoading ? "info" : locationFixed ? "active" : "error"} 
+                    pulse={isLocationLoading || locationFixed}
+                  >
+                    {isLocationLoading ? "Acquiring" : locationFixed ? "Fixed" : "No GPS"}
+                  </StatusBadge>
+                  <button 
+                    onClick={handleRefreshLocation}
+                    className="p-2 rounded-full hover:bg-muted transition-colors"
+                    disabled={isLocationLoading}
+                  >
+                    <RefreshCw className={`w-4 h-4 text-muted-foreground ${isLocationLoading ? "animate-spin" : ""}`} />
+                  </button>
+                </div>
               </div>
 
               <div className="h-32 rounded-xl bg-muted overflow-hidden relative">
                 <div className="absolute inset-0 bg-gradient-to-br from-primary/20 to-info/20 flex items-center justify-center">
                   <div className="text-center">
                     <Crosshair className="w-8 h-8 text-primary mx-auto mb-2" />
-                    <p className="text-xs text-muted-foreground">Map Preview</p>
+                    <p className="text-xs text-muted-foreground">
+                      {locationFixed 
+                        ? `Accuracy: ${location?.accuracy.toFixed(0)}m` 
+                        : "Map Preview"}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -126,49 +160,20 @@ export default function Attendance() {
               className="w-full animate-pulse-glow"
               size="lg"
               onClick={handleTakePhoto}
-              disabled={!locationFixed}
+              disabled={!locationFixed || isCapturing}
             >
-              <Camera className="w-5 h-5" />
-              Take Photo & Check In
+              {isCapturing ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  Opening Camera...
+                </>
+              ) : (
+                <>
+                  <Camera className="w-5 h-5" />
+                  Take Photo & Check In
+                </>
+              )}
             </Button>
-          </motion.div>
-        )}
-
-        {step === "camera" && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="flex-1 flex flex-col -m-4"
-          >
-            <div className="flex-1 bg-foreground/90 relative">
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="w-64 h-80 border-4 border-primary/50 rounded-3xl relative">
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-background px-3 py-1 rounded-full">
-                    <p className="text-xs font-medium text-primary">Position your face</p>
-                  </div>
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <User className="w-24 h-24 text-primary/30" />
-                  </div>
-                </div>
-              </div>
-
-              <div className="absolute bottom-8 left-0 right-0 px-6 space-y-4">
-                <Card className="p-3 bg-background/90 backdrop-blur-sm">
-                  <p className="text-xs text-center text-muted-foreground">
-                    <span className="text-primary font-medium">Tip:</span> Blink or smile to confirm liveness
-                  </p>
-                </Card>
-
-                <div className="flex justify-center">
-                  <button
-                    onClick={handleCapturePhoto}
-                    className="w-20 h-20 rounded-full bg-primary-foreground border-4 border-primary flex items-center justify-center shadow-elevated active:scale-95 transition-transform"
-                  >
-                    <div className="w-16 h-16 rounded-full gradient-primary" />
-                  </button>
-                </div>
-              </div>
-            </div>
           </motion.div>
         )}
 
@@ -184,19 +189,31 @@ export default function Attendance() {
             </div>
 
             <Card variant="elevated" className="p-4 overflow-hidden">
-              <div className="aspect-[3/4] bg-muted rounded-xl flex items-center justify-center">
-                <div className="text-center space-y-2">
-                  <div className="w-16 h-16 rounded-full gradient-primary mx-auto flex items-center justify-center">
-                    <User className="w-8 h-8 text-primary-foreground" />
+              <div className="aspect-[3/4] bg-muted rounded-xl flex items-center justify-center overflow-hidden">
+                {photo?.base64 ? (
+                  <img 
+                    src={`data:image/jpeg;base64,${photo.base64}`} 
+                    alt="Captured selfie" 
+                    className="w-full h-full object-cover rounded-xl"
+                  />
+                ) : (
+                  <div className="text-center space-y-2">
+                    <div className="w-16 h-16 rounded-full gradient-primary mx-auto flex items-center justify-center">
+                      <User className="w-8 h-8 text-primary-foreground" />
+                    </div>
+                    <p className="text-xs text-muted-foreground">Photo Preview</p>
                   </div>
-                  <p className="text-xs text-muted-foreground">Photo Preview</p>
-                </div>
+                )}
               </div>
             </Card>
 
             <div className="flex gap-3">
-              <Button variant="secondary" className="flex-1" onClick={handleRetake}>
-                <RefreshCw className="w-5 h-5" />
+              <Button variant="secondary" className="flex-1" onClick={handleRetake} disabled={isCapturing}>
+                {isCapturing ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  <RefreshCw className="w-5 h-5" />
+                )}
                 Retake
               </Button>
               <Button className="flex-1" onClick={handleMarkAttendance}>
@@ -240,7 +257,9 @@ export default function Attendance() {
                   <MapPin className="w-4 h-4 text-muted-foreground" />
                   <span className="text-sm text-muted-foreground">Location</span>
                 </div>
-                <span className="font-semibold text-foreground text-right text-sm">123 Office Street</span>
+                <span className="font-semibold text-foreground text-right text-sm">
+                  {locationAddress}
+                </span>
               </div>
             </Card>
 
